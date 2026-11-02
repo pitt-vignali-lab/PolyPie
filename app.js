@@ -65,12 +65,13 @@
 
   // "IFNg+TNFa-IL2+", "IFNg+ , TNFa-", "IL-2+", "PD1negLAG3+", "Nrp1+2B4neg" -> [{name, key, pos}]
   // A "-" followed by a digit is part of the name (IL-2); "neg"/"pos" are accepted as signs.
+  // A name may hold inner spaces ("Granzyme B-IFNg+"); spaces around a sign still separate markers.
   // A gate whose own name ends in "+" yields a run of signs, e.g. "GZMB+-" = NOT "GZMB+": the
   // last +/- is the sign and the rest belongs to the name, so GZMB+ and GZMB+- are one marker.
   function parseSegment(seg) {
     const s = seg.replace(/[−–]/g, '-').replace(/^\s*Q\d+\s*:\s*/i, '').trim();
     if (!s) return null;
-    const re = /([^\s,;]+?)\s*((?:\+|-(?!\d))+|neg|pos)/gi;
+    const re = /([^\s,;](?:[^,;]*?[^\s,;])?)\s*((?:\+|-(?!\d))+|neg|pos)/gi;
     const toks = [];
     let m, last = 0;
     while ((m = re.exec(s))) {
