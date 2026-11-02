@@ -91,15 +91,76 @@
   // Parses gate column names, e.g. "CD4/IFNg+TNFa-IL2+ | Freq. of Parent" or "PD1+/LAG3-/TIGIT+".
   function parseGateName(header) {
     const segs = String(header).split('|')[0].split('/');
-    let toks = [];
-    for (let i = segs.length - 1; i >= 0; i--) {
+    let toks = [], i = segs.length - 1;
+    for (; i >= 0; i--) {
       const t = parseSegment(segs[i]);
       if (!t) break;
       toks = t.concat(toks);
     }
     const seen = new Map();
     toks.forEach((t) => seen.set(t.key, t));
-    return seen.size >= 2 ? [...seen.values()] : null;
+    if (seen.size < 2) return null;
+    const out = [...seen.values()];
+    out.parent = segs.slice(0, i + 1).map((x) => x.trim()).join('/'); // the gating path above the markers
+    return out;
+  }
+  const statOf = (h) => String(h).split('|').slice(1).join('|').trim();
+  // Reads markers by comparing the gate columns of one export instead of by spelling. Columns
+  // of one gate family differ only in their +/- signs, so text that is identical in every
+  // column is name (Granzyme B, IL-2, HLA-DR, PD-L1) and a +/- run whose last sign changes
+  // between columns is a marker's sign. A constant "-" between letters or digits is a hyphen;
+  // any other constant sign (CD3+, a parent gate) ends the name before it. Columns this cannot
+  // place - a lone column, a family with fewer than two changing signs - fall back to
+  // parseGateName. Returns, per header cell, the tokens with .parent, or null.
+  function inferGates(header) {
+    const words = (g) => g.replace(/([A-Za-z0-9])(neg|pos|Neg|Pos|NEG|POS)(?=[A-Z0-9/,;\s]|$)/g,
+      (_, c, w) => c + (w.toLowerCase() === 'neg' ? '-' : '+'));
+    const cols = header.map((h, i) => {
+      if (h == null || h === '') return null;
+      const gate = words(String(h).split('|')[0].replace(/[−–]/g, '-').split('/')
+        .map((x) => x.replace(/^\s*Q\d+\s*:\s*/i, '')).join('/')).trim();
+      const runs = [...gate.matchAll(/[+-]+/g)].map((m) => ({ at: m.index, s: m[0] }));
+      return { i, gate, runs, fam: gate.replace(/[+-]+/g, '\u0001') + '\u0002' + statOf(h) };
+    });
+    const fams = new Map();
+    cols.forEach((c) => { if (c && c.runs.length) { if (!fams.has(c.fam)) fams.set(c.fam, []); fams.get(c.fam).push(c); } });
+
+    const out = header.map(() => null);
+    fams.forEach((fam) => {
+      if (fam.length < 2) return;
+      const nR = fam[0].runs.length;
+      const varies = Array.from({ length: nR }, (_, r) => new Set(fam.map((c) => c.runs[r].s.slice(-1))).size > 1);
+      if (varies.filter(Boolean).length < 2) return;
+      // a constant run is a hyphen inside a name when it is a lone "-" between two word characters
+      const isHyphen = (c, r) => !varies[r] && c.runs[r].s === '-' && /\w/.test(c.gate[c.runs[r].at - 1] || '')
+        && /\w/.test(c.gate[c.runs[r].at + 1] || '');
+      const toksOf = (c) => {
+        const toks = [];
+        let nameStart0 = -1;
+        c.runs.forEach((run, r) => {
+          if (!varies[r]) return;
+          let b = 0;
+          for (let q = r - 1; q >= 0; q--) {
+            if (isHyphen(c, q)) continue;
+            b = c.runs[q].at + c.runs[q].s.length;
+            break;
+          }
+          const slash = c.gate.lastIndexOf('/', run.at - 1);
+          if (slash + 1 > b) b = slash + 1;
+          const raw = c.gate.slice(b, run.at);
+          const name = raw.replace(/^[\s,;]+|[\s,;]+$/g, '');
+          if (nameStart0 < 0) nameStart0 = b;
+          toks.push({ name, key: name.toLowerCase(), pos: run.s.endsWith('+'), raw: name + run.s, amb: run.s.length > 1 });
+        });
+        if (toks.some((t) => !t.name)) return null;
+        toks.parent = c.gate.slice(0, nameStart0).replace(/[\s,;/]+$/, '');
+        return toks;
+      };
+      const all = fam.map(toksOf);
+      if (all.some((t) => !t) || new Set(all.map(keyOf)).size !== 1 || new Set(all[0].map((t) => t.key)).size !== all[0].length) return;
+      fam.forEach((c, k) => { out[c.i] = all[k]; });
+    });
+    return out.map((t, i) => t || (header[i] ? parseGateName(header[i]) : null));
   }
   const keyOf = (toks) => toks.map((t) => t.key).sort().join('\u0001');
 
@@ -115,11 +176,14 @@
 
   // ---------- dataset builders ----------
   function buildFlowJo(header, body) {
-    const selectedStat = $('importStat').value;
-    const parsed = header.map((h) => {
+    const nParents = $('importParent').options.length;
+    const selectedStat = $('importStat').value, selectedParent = $('importParent').value;
+    const gates = inferGates(header);
+    const parsed = header.map((h, i) => {
       if (!h) return null;
-      const stat = String(h).split('|').slice(1).join('|').trim();
-      return selectedStat && stat !== selectedStat ? null : parseGateName(h);
+      if (selectedStat && statOf(h) !== selectedStat) return null;
+      const p = gates[i];
+      return p && selectedParent && p.parent !== selectedParent ? null : p;
     });
     const counts = new Map();
     parsed.forEach((p) => { if (p) counts.set(keyOf(p), (counts.get(keyOf(p)) || 0) + 1); });
@@ -150,13 +214,16 @@
     cols.forEach((c) => {
       const signs = kept.map((t) => signOf(c, t.key));
       const k = signs.map(Number).join('');
-      if (seen.has(k)) throw new Error(`Duplicate FlowJo combination at column ${c.i + 1}. Select one parent population and one statistic before importing.`);
+      if (seen.has(k)) {
+        const first = colIdx[[...seen].indexOf(k)];
+        throw new Error(`Duplicate FlowJo combination: column ${first + 1} ("${header[first]}") and column ${c.i + 1} ("${header[c.i]}") are the same combination. Choose one parent population and one statistic under Import options.`);
+      }
       seen.add(k); combos.push(signs); colIdx.push(c.i);
     });
 
     const gateSet = new Set(cols.map((c) => c.i));
     const colName = (i) => header[i] || `Column ${i + 1}`;
-    const textCols = header.map((_, i) => i).filter((i) => !gateSet.has(i) && !parseGateName(header[i]));
+    const textCols = header.map((_, i) => i).filter((i) => !gateSet.has(i) && !gates[i]);
     // The sample-name column identifies the row; any other text column (Group, Day, ...) is kept
     // for averaging. Prefer a sample-like header whose values are mostly unique, otherwise the
     // column with the most distinct values, so a leading "Group" column is not taken as the name.
@@ -187,7 +254,7 @@
     return {
       markers, combos, samples: uniqueNames(samples), ambiguous,
       groupCols: textCols.filter((i) => i !== nameCol).map(colName),
-      info: `Detected gate-name columns (FlowJo style): ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} samples. Statistic: ${selectedStat || 'unspecified'}. Incomplete samples excluded: ${missingSamples}. Constant gates excluded: ${constantMarkers.join(", ") || "none"}. Confirm these are parent gates; export all states for functional markers.`,
+      info: `${nParents > 1 ? `This file has ${nParents} parent populations; showing ${selectedParent} (change it under Import options). ` : ''}Detected gate-name columns (FlowJo style): ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} samples. Statistic: ${selectedStat || 'unspecified'}. Incomplete samples excluded: ${missingSamples}. Constant gates excluded: ${constantMarkers.join(", ") || "none"}. Confirm these are parent gates; export all states for functional markers.`,
     };
   }
 
@@ -325,10 +392,20 @@
     render();
   }
 
-  // A FlowJo export can hold several statistics; let the user say which one is the data.
+  // A FlowJo export can hold several statistics and several parent populations (e.g. two
+  // tetramers side by side); each combination then appears more than once, so the user picks one.
   function fillStatPicker(rows) {
-    const stats = [...new Set((rows[0] || []).filter((h) => h && parseGateName(h))
-      .map((h) => String(h).split('|').slice(1).join('|').trim()))];
+    const head = rows[0] || [], inferred = inferGates(head);
+    const gates = head.filter((h, i) => h && inferred[i]);
+    const parents = [...new Set(head.map((_, i) => inferred[i] && inferred[i].parent).filter((x) => x != null))];
+    const psel = $('importParent'), prevParent = psel.value;
+    psel.innerHTML = '';
+    parents.forEach((x) => psel.add(new Option(x || '(none)', x)));
+    psel.value = parents.includes(prevParent) ? prevParent : (parents[0] || '');
+    $('importParentRow').hidden = parents.length < 2;
+    if (parents.length > 1) $('importParentRow').closest('details').open = true;
+
+    const stats = [...new Set(gates.map(statOf))];
     const sel = $('importStat'), previous = sel.value;
     sel.innerHTML = '';
     stats.forEach((x) => sel.add(new Option(x || '(unspecified)', x)));
@@ -1697,7 +1774,7 @@
   $('download').addEventListener('click', download);
   $('downloadCsv').addEventListener('click', downloadCsv);
   const reloadImport = () => { if (st.wb) loadSheet($('sheet').value); };
-  ['importStat', 'missingPolicy'].forEach((id) => $(id).addEventListener('change', reloadImport));
+  ['importStat', 'importParent', 'missingPolicy'].forEach((id) => $(id).addEventListener('change', reloadImport));
   $('applyImport').addEventListener('click', reloadImport);
   $('showPoints').addEventListener('change', render);
   $('statsSeed').addEventListener('change', render);

@@ -48,6 +48,7 @@
         <summary>Import options</summary>
         <label class="full">Marker columns (combination tables; optional)<input id="markerColumns" type="text" placeholder="e.g. IFNg, TNFa, IL2"></label>
         <p class="hint">Leave blank for automatic detection. Set these names when both marker and sample columns contain only 0/1.</p>
+        <label id="importParentRow" class="full" hidden>Parent population<select id="importParent"></select></label>
         <label id="importStatRow" class="full" hidden>FlowJo statistic<select id="importStat"><option value="">Automatic</option></select></label>
         <label class="full">Incomplete samples<select id="missingPolicy"><option value="error">Stop and show the missing value</option><option value="exclude">Exclude incomplete samples</option></select></label>
         <button type="button" id="applyImport">Apply import options</button>
@@ -297,6 +298,6 @@
   </main>
 </div>
 
-<script src="app.js?v=24"></script>
+<script src="app.js?v=26"></script>
 </body>
 </html>
