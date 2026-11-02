@@ -23,7 +23,7 @@
     countOverride: {},    // k -> color chosen by user
     pieOff: new Set(),    // pie names hidden by user
     pieMode: 'sample', groupCol: '',
-    pieSig: '', lastSvg: '', lastSize: null, lastData: null, lastBar: null, lastStats: null,
+    pieSig: '', lastSvg: '', lastSize: null, lastData: null, lastBar: null, lastStats: null, lastCountBar: null, lastCountStats: null,
   };
   let opts = {};
   // v0.2: imports fail explicitly; composition always uses a documented nonnegative projection.
@@ -682,8 +682,8 @@
 
   // ---------- SVG rendering ----------
   const measureCtx = document.createElement('canvas').getContext('2d');
-  function textW(s, size) {
-    measureCtx.font = `${size}px ${opts.fontFamily}`;
+  function textW(s, size, bold) {
+    measureCtx.font = `${bold ? 'bold ' : ''}${size}px ${opts.fontFamily}`;
     return measureCtx.measureText(s).width;
   }
   function pt(cx, cy, r, deg) {
@@ -908,20 +908,62 @@
   // cannot carry an error bar. Combinations are named by a +/- matrix under the axis instead of
   // rotated labels. Bars, error bars and gridlines are all rects, so the PPTX export - which
   // speaks rect / sector / circle / text - gets every one of them as a real shape too.
-  function buildBarSvg(d, res) {
+  // `view` says what one bar slot is: by default a combination, or (countView) every
+  // combination with the same number of positive markers pooled together.
+  function comboView(d) {
+    return {
+      cols: d.combos.map((cmb) => ({ label: comboLabel(cmb, d.markers), marks: cmb.map((x) => (x ? '+' : '\u2212')), on: cmb })),
+      rows: d.markers.map((mk) => mk.label),
+      reps: compositionReps,
+    };
+  }
+  function countView(d) {
+    const ks = [], js = new Map();
+    d.combos.forEach((cmb, j) => {
+      const k = cmb.filter(Boolean).length;
+      if (!js.has(k)) { ks.push(k); js.set(k, []); }
+      js.get(k).push(j);
+    });
+    return {
+      cols: ks.map((k) => ({ label: `${k} positive`, marks: [String(k)], on: [true] })),
+      rows: ['No. positive'],
+      reps: (p) => compositionReps(p).map((r) => ks.map((k) => js.get(k).reduce((a, j) => a + r[j], 0))),
+    };
+  }
+
+  function buildBarSvg(d, res, view = comboView(d)) {
     const o = opts, fs = o.fontSize, pad = Math.max(10, fs);
-    const pies = d.pies, m = d.combos.length, nG = pies.length, nM = d.markers.length;
+    // with a comparison running, the bars can be limited to the two groups being tested;
+    // each group keeps its color index so it matches the all-groups view
+    const shown = d.pies.map((p, ci) => ({ p, ci }));
+    const pair = res && o.barGroups === 'pair'
+      ? [res.a, res.b].map((n) => shown.find((g) => g.p.name === n)).filter(Boolean)
+      : shown;
+    const pies = pair.map((g) => g.p), colorOf = (gi) => GROUP_COLORS[pair[gi].ci % GROUP_COLORS.length];
+    const m = view.cols.length, nG = pies.length, nM = view.rows.length;
     if (!m || !nG) return null;
 
-    const cells = pies.map((p) => d.combos.map((_, j) => {
-      const xs = compositionReps(p).map((r) => r[j] * 100);
+    const cells = pies.map((p) => view.cols.map((_, j) => {
+      const xs = view.reps(p).map((r) => r[j] * 100);
       return { m: mean(xs), s: errHalf(xs), xs };
     }));
 
+    // the label printed above each combination: stars from q, or the p / q value itself
+    const fmtShort = (v) => (v < 0.001 ? '<0.001' : `=${v.toFixed(3)}`);
+    const sigText = (j) => {
+      if (!res) return '';
+      if (o.sigLabel === 'p') return `p${fmtShort(res.p[j])}`;
+      if (o.sigLabel === 'q') return `q${fmtShort(res.q[j])}`;
+      return res.star[j];
+    };
+    const sigSize = o.sigLabel === 'stars' ? fs * 1.1 : fs * 0.85;
+    const sigW = res ? Math.max(0, ...view.cols.map((_, j) => textW(sigText(j), sigSize, true))) : 0;
+
     const barW = Math.max(6, Math.round(fs * 0.9)), barGap = 2;
-    const groupGap = Math.max(fs, barW);
     const cellW = nG * barW + (nG - 1) * barGap;
-    const plotW = m * cellW + (m - 1) * groupGap;
+    // one slot per combination, wide enough for its bars and its p label
+    const slotW = Math.max(cellW + Math.max(fs, barW), sigW + fs * 1.2);
+    const plotW = m * slotW;
     const plotH = Math.max(140, Math.round(o.radius * 1.6));
 
     // y scale, rounded out to a readable step
@@ -933,43 +975,46 @@
     for (let v = 0; v <= yMax + 1e-9; v += step) ticks.push(v);
     const tickLab = (v) => v.toFixed(Math.max(0, Math.ceil(-Math.log10(step)) + (String(step).includes('2.5') ? 1 : 0)));
 
-    const leftW = Math.max(...ticks.map((v) => textW(tickLab(v), fs)), ...d.markers.map((k) => textW(k.label, fs))) + fs * 0.7;
-    const legend = pies.map((p, gi) => ({ s: `${p.name} (n=${sampleN(p)})`, c: GROUP_COLORS[gi % GROUP_COLORS.length] }));
+    const leftW = Math.max(...ticks.map((v) => textW(tickLab(v), fs)), ...view.rows.map((k) => textW(k, fs))) + fs * 0.7;
+    const legend = pies.map((p, gi) => ({ s: `${p.name} (n=${sampleN(p)})`, c: colorOf(gi) }));
     const legendW = legend.reduce((a, it) => a + fs * 1.2 + textW(it.s, fs) + fs, -fs);
 
     const titleH = o.title ? fs * 2 : 0;
+    const overall = res ? `${res.a} vs ${res.b}: overall p = ${fmtP(res.pOverall)}` : '';
+    const overallH = res ? fs * 1.6 : 0;
     const starH = res ? fs * 1.3 : fs * 0.4;
     const capH = fs * 1.4;                                  // "% of total" caption above the axis
     const matrixH = fs * (1.6 + Math.max(0, nM - 1) * 1.25);
     const legendH = fs * 2;
     const x0 = pad + leftW;
-    const W = Math.round(Math.max(x0 + plotW + pad, pad * 2 + legendW));
-    const H = Math.round(pad * 2 + titleH + capH + starH + plotH + matrixH + legendH);
-    const yTop = pad + titleH + capH + starH;
+    const caption = opts.errMode === 'none' ? axisCaption() : `${axisCaption()} (mean \u00b1 ${errLabel()})`;
+    const W = Math.round(Math.max(x0 + plotW + pad, pad * 2 + legendW, pad * 2 + textW(overall, fs, true), pad * 2 + textW(caption, fs)));
+    const H = Math.round(pad * 2 + titleH + overallH + capH + starH + plotH + matrixH + legendH);
+    const yTop = pad + titleH + overallH + capH + starH;
     const yBase = yTop + plotH;
     const Y = (v) => yBase - (v / yMax) * plotH;
 
     const els = [];
     if (o.background === 'white') els.push({ t: 'rect', x: 0, y: 0, w: W, h: H, fill: '#ffffff', name: 'Background' });
     if (o.title) els.push({ t: 'text', x: W / 2, y: pad + fs, s: o.title, size: fs * 1.25, anchor: 'middle', color: '#111111', bold: true, name: 'Title' });
-    els.push({ t: 'text', x: pad, y: yTop - fs * 0.8,
-      s: opts.errMode === 'none' ? axisCaption() : `${axisCaption()} (mean \u00b1 ${errLabel()})`,
-      size: fs, anchor: 'start', color: '#444444', name: 'Y axis caption' });
+    if (res) els.push({ t: 'text', x: pad, y: pad + titleH + fs * 0.8, s: overall, size: fs, anchor: 'start', color: '#111111', bold: true, name: 'Overall p',
+      tip: `${res.nPerm.toLocaleString()} ${res.exact ? 'exact' : 'sampled'} permutations` });
+    els.push({ t: 'text', x: pad, y: yTop - starH - fs * 0.6, s: caption, size: fs, anchor: 'start', color: '#444444', name: 'Y axis caption' });
 
     ticks.forEach((v) => {
       els.push({ t: 'rect', x: x0, y: Y(v), w: plotW, h: v === 0 ? 1.2 : 1, fill: v === 0 ? '#444444' : '#e8e8e8', name: `Gridline ${tickLab(v)}` });
       els.push({ t: 'text', x: x0 - fs * 0.45 - textW(tickLab(v), fs), y: Y(v), s: tickLab(v), size: fs, anchor: 'start', color: '#444444', name: `Y label ${tickLab(v)}` });
     });
 
-    d.combos.forEach((cmb, j) => {
-      const gx = x0 + j * (cellW + groupGap);
-      const label = comboLabel(cmb, d.markers);
+    view.cols.forEach((col, j) => {
+      const gx = x0 + j * slotW + (slotW - cellW) / 2;
+      const label = col.label;
       pies.forEach((p, gi) => {
         const c = cells[gi][j], bx = gx + gi * (barW + barGap);
         if (!Number.isFinite(c.m)) return;
         const by = Y(Math.min(c.m, yMax));
         els.push({ t: 'rect', x: bx, y: by, w: barW, h: Math.max(0, yBase - by),
-          fill: GROUP_COLORS[gi % GROUP_COLORS.length],
+          fill: colorOf(gi),
           name: `${p.name} ${label} mean ${c.m.toFixed(2)}%`,
           tip: `${p.name} \u00b7 ${label}\n${c.m.toFixed(2)}%${c.s > 0 ? ` \u00b1 ${c.s.toFixed(2)} ${errLabel()}` : ''} (n=${sampleN(p)})` });
         if (o.showPoints) c.xs.forEach((v, ri) => {
@@ -985,20 +1030,20 @@
           els.push({ t: 'rect', x: cx - cap / 2, y: bot - wv, w: cap, h: wv, fill: '#333333', name: 'SD cap' });
         }
       });
-      if (res && res.star[j]) {
-        els.push({ t: 'text', x: gx + cellW / 2, y: yTop - fs * 0.55, s: res.star[j], size: fs * 1.1,
+      if (res && sigText(j)) {
+        els.push({ t: 'text', x: gx + cellW / 2, y: yTop - fs * 0.55, s: sigText(j), size: sigSize,
           anchor: 'middle', color: '#111111', bold: true, name: `Significance ${label}`,
           tip: `${label} \u00b7 p = ${fmtP(res.p[j])}, q = ${fmtP(res.q[j])}` });
       }
-      d.markers.forEach((mk, mi) => {
-        els.push({ t: 'text', x: gx + cellW / 2, y: yBase + fs * (1 + mi * 1.25), s: cmb[mi] ? '+' : '\u2212',
-          size: fs, anchor: 'middle', color: cmb[mi] ? '#111111' : '#aaaaaa', name: `${label} ${mk.label}` });
+      view.rows.forEach((row, mi) => {
+        els.push({ t: 'text', x: gx + cellW / 2, y: yBase + fs * (1 + mi * 1.25), s: col.marks[mi],
+          size: fs, anchor: 'middle', color: col.on[mi] ? '#111111' : '#aaaaaa', name: `${label} ${row}` });
       });
     });
 
-    d.markers.forEach((mk, mi) => {
-      els.push({ t: 'text', x: x0 - fs * 0.45 - textW(mk.label, fs), y: yBase + fs * (1 + mi * 1.25),
-        s: mk.label, size: fs, anchor: 'start', color: '#444444', name: `Row ${mk.label}` });
+    view.rows.forEach((row, mi) => {
+      els.push({ t: 'text', x: x0 - fs * 0.45 - textW(row, fs), y: yBase + fs * (1 + mi * 1.25),
+        s: row, size: fs, anchor: 'start', color: '#444444', name: `Row ${row}` });
     });
 
     let lx = pad + Math.max(0, (W - pad * 2 - legendW) / 2);
@@ -1083,8 +1128,14 @@
     const on = $('statsOn').checked && st.pieMode === 'group';
     $('statsPair').hidden = !on;
     $('statsWrap').hidden = !on;
-    st.lastStats = null; st.lastBar = null;
-    if (!on) { $('statsMsg').textContent = ''; return; }
+    st.lastStats = null; st.lastBar = null; st.lastCountStats = null; st.lastCountBar = null;
+    if (!on) {
+      // say why nothing appeared rather than leaving a ticked box with no chart
+      $('statsMsg').textContent = !$('statsOn').checked ? ''
+        : !st.ds.groupCols.length ? 'The bar chart needs a Group column in the file: give every replicate of a condition the same group name (e.g. Healthy, HIV).'
+        : 'Set "One pie per" (section 2, Pies) to Group (mean) to show the bar chart.';
+      return;
+    }
 
     syncGroupSelect($('statsA'), d.pies.map((p) => p.name), 0);
     syncGroupSelect($('statsB'), d.pies.map((p) => p.name), 1);
@@ -1094,7 +1145,8 @@
     const msg = [];
     const dropped = d.pies.reduce((x, p) => x + (p.dropped || 0), 0);
     if (dropped) msg.push(`${dropped} replicate${dropped > 1 ? 's' : ''} with no usable composition (zero total, or an excluded negative value) left out of the means and the tests.`);
-    let res = null;
+    let res = null, resCount = null;
+    const cv = countView(d);
     if (a && b && a === b) msg.push('Pick two different groups to compare.');
     else if (!a || !b || !a.reps || !b.reps || a.reps.length < 2 || b.reps.length < 2) {
       msg.push('A test needs at least two usable replicates in each of two groups.');
@@ -1102,6 +1154,10 @@
       const r = cachedComparison(a.reps, b.reps);
       const q = bhAdjust(r.p);
       res = { ...r, q, star: q.map(stars), a: a.name, b: b.name };
+      // the same tests on the pooled 3+ / 2+ / 1+ / 0 categories
+      const rc = cachedComparison(cv.reps(a), cv.reps(b));
+      const qc = bhAdjust(rc.p);
+      resCount = { ...rc, q: qc, star: qc.map(stars), a: a.name, b: b.name };
       msg.push(`${a.name} (n=${a.reps.length}) vs ${b.name} (n=${b.reps.length}) — mean-composition L1 p = ${fmtP(r.pOverall)}, ` +
         `from ${r.nPerm.toLocaleString()} ${r.exact ? 'exact' : 'sampled'} permutations; seed ${r.seed}. Unpaired samples; ${axisCaption()}. Negative inputs: ${opts.clipNeg ? 'clipped per sample' : 'affected samples excluded'}.`);
     }
@@ -1111,6 +1167,31 @@
     st.lastStats = res; st.lastBar = fig;
     $('barPlot').innerHTML = fig ? fig.svg : '';
     $('statsTable').innerHTML = buildStatsTable(d, res);
+
+    const figCount = buildBarSvg(d, resCount, cv);
+    st.lastCountStats = resCount; st.lastCountBar = figCount;
+    $('countPlot').innerHTML = figCount ? figCount.svg : '';
+    $('countTable').innerHTML = buildCountTable(d, resCount, cv);
+  }
+
+  // one row per number of positive markers, all combinations with that count summed
+  function buildCountTable(d, res, cv) {
+    if (!d.pies.length) return '';
+    let h = '<table class="data"><thead><tr><th>No. positive</th>';
+    d.pies.forEach((p) => { h += `<th>${esc(p.name)}<br>mean %${opts.errMode === 'none' ? '' : ` ± ${errLabel()}`} (n=${sampleN(p)})</th>`; });
+    if (res) h += '<th>p</th><th>q (BH)</th><th></th>';
+    h += '</tr></thead><tbody>';
+    cv.cols.forEach((col, j) => {
+      h += `<tr><td>${esc(col.label)}</td>`;
+      d.pies.forEach((p) => {
+        const xs = cv.reps(p).map((r) => r[j] * 100);
+        const e = errHalf(xs);
+        h += `<td>${numberText(mean(xs))}${e > 0 ? ` ± ${e.toFixed(2)}` : ''}</td>`;
+      });
+      if (res) h += `<td>${fmtP(res.p[j])}</td><td>${fmtP(res.q[j])}</td><td>${res.star[j]}</td>`;
+      h += '</tr>';
+    });
+    return h + '</tbody></table>';
   }
 
   const repPct = (p, j) => compositionReps(p).map((r) => r[j] * 100);
@@ -1199,6 +1280,25 @@
           xs.length > 1 ? sem(xs).toFixed(4) : '', errHalf(xs).toFixed(4), xs.length);
       });
       if (res) row.push(res.p[j].toFixed(6), res.q[j].toFixed(6));
+      lines.push(row.join(','));
+    });
+
+    // pooled by number of positive markers
+    const cv = countView(d), rc = st.lastCountStats;
+    lines.push('');
+    if (rc) {
+      lines.push([q(`By number of positive markers - overall permutation test: ${rc.a} vs ${rc.b}`), q(`p = ${fmtP(rc.pOverall)}`),
+        q(`${rc.nPerm} ${rc.exact ? 'exact' : 'sampled'} permutations`)].join(','));
+    }
+    lines.push([q('No. positive'), ...head.slice(2).map(q)].join(','));
+    cv.cols.forEach((col, j) => {
+      const row = [q(col.label)];
+      d.pies.forEach((p) => {
+        const xs = cv.reps(p).map((r) => r[j] * 100);
+        row.push(numberText(mean(xs), 4), xs.length > 1 ? sd(xs).toFixed(4) : '',
+          xs.length > 1 ? sem(xs).toFixed(4) : '', errHalf(xs).toFixed(4), xs.length);
+      });
+      if (rc) row.push(rc.p[j].toFixed(6), rc.q[j].toFixed(6));
       lines.push(row.join(','));
     });
     saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' }), `${baseName()}_statistics.csv`);
@@ -1555,7 +1655,13 @@
   $('applyImport').addEventListener('click', reloadImport);
   $('showPoints').addEventListener('change', render);
   $('statsSeed').addEventListener('change', render);
-  $('statsOn').addEventListener('change', render);
+  // the bar chart only exists per group, so asking for it switches the pies to group means
+  $('statsOn').addEventListener('change', (e) => {
+    if (e.target.checked && st.ds && st.ds.groupCols.length && st.pieMode !== 'group') {
+      $('pieMode').value = st.pieMode = 'group';
+    }
+    render();
+  });
   $('statsA').addEventListener('change', render);
   $('statsB').addEventListener('change', render);
   $('dlStats').addEventListener('click', downloadStatsCsv);
@@ -1564,6 +1670,11 @@
     if (!st.lastBar) return;
     const fmt = $('fmt').value;
     saveBlob(await figToBlob(st.lastBar, fmt), `${baseName()}_bars${EXT[fmt]}`);
+  }));
+  $('dlCountBar').addEventListener('click', () => withBusy(async () => {
+    if (!st.lastCountBar) return;
+    const fmt = $('fmt').value;
+    saveBlob(await figToBlob(st.lastCountBar, fmt), `${baseName()}_bars_by_count${EXT[fmt]}`);
   }));
 
   const demo = new URLSearchParams(location.search).get('demo');

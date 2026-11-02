@@ -37,6 +37,14 @@ nothing can reach significance). Replicates with no events have no composition a
 the means and the tests; the panel says how many. The bar chart and a statistics CSV export
 separately.
 
+By default the bar chart shows only the two groups being compared, prints the overall p above the
+plot, and labels each combination with its per-combination p. *Bars for* switches back to all
+groups, and *Label above bars* switches to BH q values or significance stars.
+
+A second chart, **By number of positive markers**, pools every combination with the same number of
+positive markers (3+, 2+, 1+, 0) whichever markers they are, and runs the same tests on those
+pooled categories. It has its own download button and table, and is included in the statistics CSV.
+
 ## Options
 
 Pie selection or per-group means, marker on/off (collapses combinations), marker display names and arc colors, slice coloring, sort order, radius / donut hole / arc width & spacing, start angle and direction, percent labels, title, font, legend position, background. Export as SVG, PDF (vector), PNG or JPEG (150/300/600 DPI, DPI written into the file), plus the processed data as CSV.

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PolyPie — polyfunctionality pie charts</title>
 <meta name="description" content="Upload an Excel or CSV file to create polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=17">
+<link rel="stylesheet" href="style.css?v=18">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -202,6 +202,19 @@
             <option value="none">None</option>
           </select>
         </label>
+        <label>Bars for
+          <select data-key="barGroups">
+            <option value="pair" selected>Compared pair</option>
+            <option value="all">All groups</option>
+          </select>
+        </label>
+        <label>Label above bars
+          <select data-key="sigLabel">
+            <option value="p" selected>p value</option>
+            <option value="q">q value (BH)</option>
+            <option value="stars">Stars (q)</option>
+          </select>
+        </label>
       </div>
       <label class="chk"><input type="checkbox" id="showPoints" checked> Show individual samples</label>
       <label class="full">Random seed<input type="number" id="statsSeed" value="20261007" min="0" max="4294967295" step="1"></label>
@@ -253,6 +266,13 @@
         <button type="button" id="dlStats" class="ghost">Download statistics (CSV)</button>
       </div>
       <div id="statsTable"></div>
+      <h3 class="statsSub">By number of positive markers</h3>
+      <p class="hint">Every combination with the same number of positive markers pooled together, whichever markers they are.</p>
+      <div class="canvasWrap" id="countPlot"></div>
+      <div class="btns">
+        <button type="button" id="dlCountBar" class="ghost">Download this bar chart</button>
+      </div>
+      <div id="countTable"></div>
     </section>
     <details class="tableWrap" id="rawWrap" hidden>
       <summary>Averaged raw values (input units, before normalization)</summary>
@@ -266,6 +286,6 @@
   </main>
 </div>
 
-<script src="app.js?v=17"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>
