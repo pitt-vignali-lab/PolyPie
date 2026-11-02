@@ -14,21 +14,22 @@ A browser-based tool that turns an Excel / CSV file into polyfunctionality pie c
 | +    | +    | -   | 0.35    | 0.10 |
 
 **B. Gate-name columns (FlowJo export / Shiny-app CSV)** — one row per sample; column names encode the combination, e.g.
-`CD4/IFNg+TNFa-IL2+ | Freq. of Parent` or `PD1+/LAG3-/TIGIT+`. A gate whose own name ends in `+` also works: a trailing `+-` is read as negative, so `GZMB+IFNg+TNFa-` and `GZMB+-IFNg+TNFa-` are GZMB+ and GZMB- of the same marker. When a file contains such `+-` gates, a note at the top of the page states the convention that was applied. The sample-name column is detected automatically (a `Sample`/`Name`/`ID`-style header, else the text column with the most distinct values); the remaining text columns (e.g. `Group`) can be used to average pies per group. Rows named Mean / SD are ignored, and parent gates that are always positive (e.g. `CD4+`) are dropped. Markers are read by comparing the gate columns with each other rather than by spelling: text that is the same in every column is name, and the +/- signs that change between columns are the signs. So names may contain spaces and hyphens (`Granzyme B-IFNg-IL-2-TNFa-`, `HLA-DR+PD-L1-Ki-67+`); a lone column falls back to reading the name directly. When one file holds the same combinations under several parent populations (e.g. `…/pMEL/BEL/…` and `…/pMEL/MUS/…`) or several statistics, the first parent is imported and *Import options* offers the others.
+`CD4/IFNg+TNFa-IL2+ | Freq. of Parent` or `PD1+/LAG3-/TIGIT+`. A gate whose own name ends in `+` also works: a trailing `+-` is read as negative, so `GZMB+IFNg+TNFa-` and `GZMB+-IFNg+TNFa-` are GZMB+ and GZMB- of the same marker. When a file contains such `+-` gates, a note at the top of the page states the convention that was applied. The sample-name column is detected automatically (a `Sample`/`Name`/`ID`-style header, else the text column with the most distinct values); the remaining text columns (e.g. `Group`) can be used to average pies per group. Rows named Mean / SD are ignored. Gates right in front of the markers that keep the same sign in every column (e.g. `CD3+CD4+IFNg+…` or `CD4+/IFNg+…`) are parent gates: they are listed under *Markers* tagged *constant* and start unticked; ticking one adds no combinations but counts toward the number of positive markers. Markers are read by comparing the gate columns with each other rather than by spelling: text that is the same in every column is name, and the +/- signs that change between columns are the signs. So names may contain spaces and hyphens (`Granzyme B-IFNg-IL-2-TNFa-`, `HLA-DR+PD-L1-Ki-67+`); a lone column falls back to reading the name directly. When one file holds the same combinations under several parent populations (e.g. `…/pMEL/BEL/…` and `…/pMEL/MUS/…`) or several statistics, the first parent is imported and *Import options* offers the others.
 
 **Averaging replicates** — add a `Group` column and give every replicate of the same condition the same name, then set *One pie per* to **Group (mean)**. Nothing else is needed: markers, combinations and arcs all come from the gate names.
 
 ## Statistics
 
-With *One pie per* set to **Group (mean)**, the **Statistics** section adds a companion bar chart
-(mean % ± SD per combination, one bar per group, combinations named by a +/- matrix under the axis)
-and compares two groups:
+Ticking **Bar chart** in the **Statistics** section switches *One pie per* to **Group (mean)** and
+adds a companion bar chart (mean % ± SD per combination, one bar per group, combinations named by a
++/- matrix under the axis) and compares two groups:
 
 - **Overall** — a permutation test on the summed absolute difference between the two groups' mean
   compositions: *do these two distributions differ?* This is the result to quote.
 - **Per combination** — a two-sided rank (Mann–Whitney) test run as an exact permutation, so the
   tied zeros common in flow data are handled correctly, with Benjamini–Hochberg FDR across
-  combinations. **Exploratory only**: the slices sum to 100%, so combinations are not independent —
+  combinations (q). Stars are given for both the unadjusted p and q
+  (`*` < 0.05, `**` < 0.01, `***` < 0.001). **Exploratory only**: the slices sum to 100%, so combinations are not independent —
   one rising forces others down.
 
 Both are exact when every group assignment can be enumerated, otherwise sampled from 20,000
@@ -39,11 +40,16 @@ separately.
 
 By default the bar chart shows only the two groups being compared, prints the overall p above the
 plot, and labels each combination with its per-combination p. *Bars for* switches back to all
-groups, and *Label above bars* switches to BH q values or significance stars.
+groups, and *Label above bars* switches to BH q values, stars from p, or stars from q.
 
 A second chart, **By number of positive markers**, pools every combination with the same number of
 positive markers (3+, 2+, 1+, 0) whichever markers they are, and runs the same tests on those
-pooled categories. It has its own download button and table, and is included in the statistics CSV.
+pooled categories. It has its own download button, a statistics table, and a table of every
+sample's value per category (downloadable as CSV); it is also included in the statistics CSV.
+
+Every results table (statistics by combination, statistics by number of positive markers,
+individual samples, averaged raw values, processed data) sits in a collapsible section; click its
+arrow to open it. The statistics tables list p, Stars (p), q (BH) and Stars (q).
 
 ## Options
 
