@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PolyPie — polyfunctionality pie charts</title>
 <meta name="description" content="Upload an Excel or CSV file to create polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=19">
+<link rel="stylesheet" href="style.css?v=21">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -213,6 +213,7 @@
           <select data-key="sigLabel">
             <option value="p" selected>p value</option>
             <option value="q">q value (BH)</option>
+            <option value="starsP">Stars (p)</option>
             <option value="stars">Stars (q)</option>
           </select>
         </label>
@@ -298,6 +299,6 @@
   </main>
 </div>
 
-<script src="app.js?v=26"></script>
+<script src="app.js?v=28"></script>
 </body>
 </html>

@@ -134,26 +134,41 @@
       // a constant run is a hyphen inside a name when it is a lone "-" between two word characters
       const isHyphen = (c, r) => !varies[r] && c.runs[r].s === '-' && /\w/.test(c.gate[c.runs[r].at - 1] || '')
         && /\w/.test(c.gate[c.runs[r].at + 1] || '');
+      const runEnd = (c, q) => c.runs[q].at + c.runs[q].s.length;
+      // the name in front of run r: back to the previous sign (hyphens skipped) or "/"
+      const nameOf = (c, r) => {
+        let b = 0;
+        for (let q = r - 1; q >= 0; q--) {
+          if (isHyphen(c, q)) continue;
+          b = runEnd(c, q);
+          break;
+        }
+        b = Math.max(b, c.gate.lastIndexOf('/', c.runs[r].at - 1) + 1);
+        return { start: b, name: c.gate.slice(b, c.runs[r].at).replace(/^[\s,;]+|[\s,;]+$/g, '') };
+      };
+      const tok = (name, run, constant) => ({ name, key: name.toLowerCase(), pos: run.s.endsWith('+'),
+        raw: name + run.s, amb: !constant && run.s.length > 1, constant });
       const toksOf = (c) => {
         const toks = [];
-        let nameStart0 = -1;
+        let start = -1;
         c.runs.forEach((run, r) => {
           if (!varies[r]) return;
-          let b = 0;
-          for (let q = r - 1; q >= 0; q--) {
-            if (isHyphen(c, q)) continue;
-            b = c.runs[q].at + c.runs[q].s.length;
-            break;
-          }
-          const slash = c.gate.lastIndexOf('/', run.at - 1);
-          if (slash + 1 > b) b = slash + 1;
-          const raw = c.gate.slice(b, run.at);
-          const name = raw.replace(/^[\s,;]+|[\s,;]+$/g, '');
-          if (nameStart0 < 0) nameStart0 = b;
-          toks.push({ name, key: name.toLowerCase(), pos: run.s.endsWith('+'), raw: name + run.s, amb: run.s.length > 1 });
+          const n = nameOf(c, r);
+          if (start < 0) start = n.start;
+          toks.push(tok(n.name, run, false));
         });
         if (toks.some((t) => !t.name)) return null;
-        toks.parent = c.gate.slice(0, nameStart0).replace(/[\s,;/]+$/, '');
+        // gates right in front of the markers that never change sign (CD3+CD4+IFNg...,
+        // CD4+/IFNg...) are kept as constant markers; the first unsigned gate starts the parent
+        for (let q = c.runs.length - 1; q >= 0; q--) {
+          if (runEnd(c, q) > start || isHyphen(c, q)) continue;
+          if (!/^[\s,;/]*$/.test(c.gate.slice(runEnd(c, q), start))) break;
+          const n = nameOf(c, q);
+          if (!n.name) break;
+          toks.unshift(tok(n.name, c.runs[q], true));
+          start = n.start;
+        }
+        toks.parent = c.gate.slice(0, start).replace(/[\s,;/]+$/, '');
         return toks;
       };
       const all = fam.map(toksOf);
@@ -195,11 +210,13 @@
     parsed.forEach((p, i) => { if (p && keyOf(p) === best) cols.push({ i, toks: p }); });
     const tokOf = (c, key) => c.toks.find((t) => t.key === key);
     const signOf = (c, key) => tokOf(c, key).pos;
-    // markers that are + in every column are parent gates (e.g. CD4+), not functions
+    // gates with the same sign in every column (e.g. CD3+CD4+) are parent gates, not functions:
+    // they are listed under Markers but start unticked
     const kept = cols[0].toks.filter((t) => new Set(cols.map((c) => signOf(c, t.key))).size > 1);
-    const markers = kept.map((t) => t.name);
-    const constantMarkers = cols[0].toks.filter((t) => !kept.includes(t)).map((t) => t.name);
-    if (markers.length < 2) return null;
+    if (kept.length < 2) return null;
+    const markers = cols[0].toks.map((t) => t.name);
+    const constant = cols[0].toks.map((t) => !kept.includes(t));
+    const constantMarkers = markers.filter((_, k) => constant[k]);
 
     // A run such as "GZMB+-" can only be read by assuming the first sign belongs to the gate name,
     // so every spelling of such a marker is reported for the user to confirm.
@@ -212,7 +229,7 @@
 
     const combos = [], colIdx = [], seen = new Set();
     cols.forEach((c) => {
-      const signs = kept.map((t) => signOf(c, t.key));
+      const signs = cols[0].toks.map((t) => signOf(c, t.key));
       const k = signs.map(Number).join('');
       if (seen.has(k)) {
         const first = colIdx[[...seen].indexOf(k)];
@@ -252,9 +269,9 @@
     if (!samples.length) return null;
 
     return {
-      markers, combos, samples: uniqueNames(samples), ambiguous,
+      markers, constant, combos, samples: uniqueNames(samples), ambiguous,
       groupCols: textCols.filter((i) => i !== nameCol).map(colName),
-      info: `${nParents > 1 ? `This file has ${nParents} parent populations; showing ${selectedParent} (change it under Import options). ` : ''}Detected gate-name columns (FlowJo style): ${markers.length} markers (${markers.join(", ")}), ${combos.length} combinations, ${samples.length} samples. Statistic: ${selectedStat || 'unspecified'}. Incomplete samples excluded: ${missingSamples}. Constant gates excluded: ${constantMarkers.join(", ") || "none"}. Confirm these are parent gates; export all states for functional markers.`,
+      info: `${nParents > 1 ? `This file has ${nParents} parent populations; showing ${selectedParent} (change it under Import options). ` : ''}Detected gate-name columns (FlowJo style): ${kept.length} markers (${kept.map((t) => t.name).join(", ")}), ${combos.length} combinations, ${samples.length} samples. Statistic: ${selectedStat || 'unspecified'}. Incomplete samples excluded: ${missingSamples}. ${constantMarkers.length ? `Constant gates listed under Markers, unticked: ${constantMarkers.join(", ")}.` : 'Constant gates: none.'} Confirm these are parent gates; export all states for functional markers.`,
     };
   }
 
@@ -312,7 +329,8 @@
     if (!header.length || !body.length) throw new Error('The sheet is empty or has no header row (the first row must contain column names).');
     const ds = buildFlowJo(header, body) || buildComboTable(header, body);
     if (!ds) throw new Error('Could not recognize the data layout. See "Supported file formats" on the left or download a template.');
-    const expected = 2 ** ds.markers.length;
+    // a constant gate adds no combinations
+    const expected = 2 ** ds.markers.filter((_, i) => !(ds.constant && ds.constant[i])).length;
     const missing = expected - ds.combos.length;
     const negatives = ds.samples.reduce((n, x) => n + x.values.filter((v) => v < 0).length, 0);
     ds.info += ` ${missing > 0 ? `${missing} combinations not supplied; percentages describe supplied combinations only.` : 'Complete combination set.'}`;
@@ -423,7 +441,8 @@
   function initFromDataset() {
     const ds = st.ds;
     statsCache.clear();
-    st.markers = ds.markers.map((m, i) => ({ name: m, label: m, include: true, color: ARC_COLORS[i % ARC_COLORS.length] }));
+    const constant = (i) => !!(ds.constant && ds.constant[i]);
+    st.markers = ds.markers.map((m, i) => ({ name: m, label: m, include: !constant(i), constant: constant(i), color: ARC_COLORS[i % ARC_COLORS.length] }));
     st.countOverride = {};
     st.pieOff = new Set();
     st.pieSig = '';
@@ -447,7 +466,7 @@
     st.markers.forEach((m) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td><input type="checkbox" ${m.include ? 'checked' : ''}></td>
-        <td><input type="text" value="${esc(m.label)}"></td>
+        <td><input type="text" value="${esc(m.label)}"${m.constant ? ' title="Same sign in every column: a parent gate, not a function. Ticking it adds no combinations, but it counts toward No. positive."' : ''}>${m.constant ? ' <span class="tag">constant</span>' : ''}</td>
         <td><input type="color" value="${m.color}"></td>`;
       const [inc, lab, col] = tr.querySelectorAll('input');
       inc.addEventListener('change', () => { m.include = inc.checked; render(); });
@@ -1033,9 +1052,9 @@
       if (!res) return '';
       if (o.sigLabel === 'p') return `p${fmtShort(res.p[j])}`;
       if (o.sigLabel === 'q') return `q${fmtShort(res.q[j])}`;
-      return res.star[j];
+      return o.sigLabel === 'starsP' ? res.starP[j] : res.star[j];
     };
-    const sigSize = o.sigLabel === 'stars' ? fs * 1.1 : fs * 0.85;
+    const sigSize = o.sigLabel === 'stars' || o.sigLabel === 'starsP' ? fs * 1.1 : fs * 0.85;
     const sigW = res ? Math.max(0, ...view.cols.map((_, j) => textW(sigText(j), sigSize, true))) : 0;
 
     const barW = Math.max(6, Math.round(fs * 0.9)), barGap = 2;
@@ -1232,11 +1251,11 @@
     } else {
       const r = cachedComparison(a.reps, b.reps);
       const q = bhAdjust(r.p);
-      res = { ...r, q, star: q.map(stars), a: a.name, b: b.name };
+      res = { ...r, q, star: q.map(stars), starP: r.p.map(stars), a: a.name, b: b.name };
       // the same tests on the pooled 3+ / 2+ / 1+ / 0 categories
       const rc = cachedComparison(cv.reps(a), cv.reps(b));
       const qc = bhAdjust(rc.p);
-      resCount = { ...rc, q: qc, star: qc.map(stars), a: a.name, b: b.name };
+      resCount = { ...rc, q: qc, star: qc.map(stars), starP: rc.p.map(stars), a: a.name, b: b.name };
       msg.push(`${a.name} (n=${a.reps.length}) vs ${b.name} (n=${b.reps.length}) — mean-composition L1 p = ${fmtP(r.pOverall)}, ` +
         `from ${r.nPerm.toLocaleString()} ${r.exact ? 'exact' : 'sampled'} permutations; seed ${r.seed}. Unpaired samples; ${axisCaption()}. Negative inputs: ${opts.clipNeg ? 'clipped per sample' : 'affected samples excluded'}.`);
     }
@@ -1302,7 +1321,7 @@
     if (!d.pies.length) return '';
     let h = '<table class="data"><thead><tr><th>No. positive</th>';
     d.pies.forEach((p) => { h += `<th>${esc(p.name)}<br>mean %${opts.errMode === 'none' ? '' : ` ± ${errLabel()}`} (n=${sampleN(p)})</th>`; });
-    if (res) h += '<th>p</th><th>q (BH)</th><th></th>';
+    if (res) h += '<th>p</th><th>Stars (p)</th><th>q (BH)</th><th>Stars (q)</th>';
     h += '</tr></thead><tbody>';
     cv.cols.forEach((col, j) => {
       h += `<tr><td>${esc(col.label)}</td>`;
@@ -1311,7 +1330,7 @@
         const e = errHalf(xs);
         h += `<td>${numberText(mean(xs))}${e > 0 ? ` ± ${e.toFixed(2)}` : ''}</td>`;
       });
-      if (res) h += `<td>${fmtP(res.p[j])}</td><td>${fmtP(res.q[j])}</td><td>${res.star[j]}</td>`;
+      if (res) h += `<td>${fmtP(res.p[j])}</td><td>${res.starP[j]}</td><td>${fmtP(res.q[j])}</td><td>${res.star[j]}</td>`;
       h += '</tr>';
     });
     return h + '</tbody></table>';
@@ -1364,7 +1383,7 @@
     if (!d.pies.length) return '';
     let h = '<table class="data"><thead><tr><th>Combination</th><th>No. positive</th>';
     d.pies.forEach((p) => { h += `<th>${esc(p.name)}<br>mean %${opts.errMode === 'none' ? '' : ` ± ${errLabel()}`} (n=${sampleN(p)})</th>`; });
-    if (res) h += '<th>p</th><th>q (BH)</th><th></th>';
+    if (res) h += '<th>p</th><th>Stars (p)</th><th>q (BH)</th><th>Stars (q)</th>';
     h += '</tr></thead><tbody>';
     d.combos.forEach((cmb, j) => {
       h += `<tr><td><span class="sw" style="background:${d.colors[j]}"></span>${esc(comboLabel(cmb, d.markers))}</td>`;
@@ -1374,7 +1393,7 @@
         const e = errHalf(xs);
         h += `<td>${numberText(mean(xs))}${e > 0 ? ` ± ${e.toFixed(2)}` : ''}</td>`;
       });
-      if (res) h += `<td>${fmtP(res.p[j])}</td><td>${fmtP(res.q[j])}</td><td>${res.star[j]}</td>`;
+      if (res) h += `<td>${fmtP(res.p[j])}</td><td>${res.starP[j]}</td><td>${fmtP(res.q[j])}</td><td>${res.star[j]}</td>`;
       h += '</tr>';
     });
     return h + '</tbody></table>';
@@ -1393,7 +1412,7 @@
     const head = ['Combination', 'No. positive'];
     d.pies.forEach((p) => head.push(`${p.name} mean %`, `${p.name} SD`, `${p.name} SEM`,
       `${p.name} error drawn (${errLabel()})`, `${p.name} n`));
-    if (res) head.push('p', 'q (BH)');
+    if (res) head.push('p', 'stars (p)', 'q (BH)', 'stars (q)');
     lines.push(head.map(q).join(','));
     d.combos.forEach((cmb, j) => {
       const row = [q(comboLabel(cmb, d.markers)), cmb.filter(Boolean).length];
@@ -1402,7 +1421,7 @@
         row.push(numberText(mean(xs), 4), xs.length > 1 ? sd(xs).toFixed(4) : '',
           xs.length > 1 ? sem(xs).toFixed(4) : '', errHalf(xs).toFixed(4), xs.length);
       });
-      if (res) row.push(res.p[j].toFixed(6), res.q[j].toFixed(6));
+      if (res) row.push(res.p[j].toFixed(6), q(res.starP[j]), res.q[j].toFixed(6), q(res.star[j]));
       lines.push(row.join(','));
     });
 
@@ -1421,7 +1440,7 @@
         row.push(numberText(mean(xs), 4), xs.length > 1 ? sd(xs).toFixed(4) : '',
           xs.length > 1 ? sem(xs).toFixed(4) : '', errHalf(xs).toFixed(4), xs.length);
       });
-      if (rc) row.push(rc.p[j].toFixed(6), rc.q[j].toFixed(6));
+      if (rc) row.push(rc.p[j].toFixed(6), q(rc.starP[j]), rc.q[j].toFixed(6), q(rc.star[j]));
       lines.push(row.join(','));
     });
     saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' }), `${baseName()}_statistics.csv`);
