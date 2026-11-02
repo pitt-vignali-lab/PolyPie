@@ -265,15 +265,21 @@
         <button type="button" id="dlBar" class="ghost">Download bar chart</button>
         <button type="button" id="dlStats" class="ghost">Download statistics (CSV)</button>
       </div>
-      <div id="statsTable"></div>
+      <details class="tableWrap">
+        <summary>Statistics by combination (mean, p, q)</summary>
+        <div id="statsTable"></div>
+      </details>
       <h3 class="statsSub">By number of positive markers</h3>
       <p class="hint">Every combination with the same number of positive markers pooled together, whichever markers they are.</p>
       <div class="canvasWrap" id="countPlot"></div>
       <div class="btns">
         <button type="button" id="dlCountBar" class="ghost">Download this bar chart</button>
       </div>
-      <div id="countTable"></div>
-      <details class="tableWrap" open>
+      <details class="tableWrap">
+        <summary>Statistics by number of positive markers (mean, p, q)</summary>
+        <div id="countTable"></div>
+      </details>
+      <details class="tableWrap">
         <summary>Individual samples (% by number of positive markers)</summary>
         <div id="countSamples"></div>
         <div class="btns"><button type="button" id="dlCountSamples" class="ghost">Download this table (CSV)</button></div>
