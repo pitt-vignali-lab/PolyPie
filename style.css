@@ -144,6 +144,7 @@ table.markers td:first-child, table.markers td:last-child { width: 40px; }
 table.data { border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
 table.data th, table.data td { padding: 4px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
 table.data th:first-child, table.data td:first-child { text-align: left; }
+#countSamples table.data th:nth-child(2), #countSamples table.data td:nth-child(2) { text-align: left; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 
 @media (max-width: 820px) {

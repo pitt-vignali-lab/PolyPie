@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PolyPie — polyfunctionality pie charts</title>
 <meta name="description" content="Upload an Excel or CSV file to create polyfunctionality pie charts, adjust the plot and export SVG / PDF / PNG / JPEG. Data is processed locally in your browser.">
-<link rel="stylesheet" href="style.css?v=18">
+<link rel="stylesheet" href="style.css?v=19">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -273,6 +273,11 @@
         <button type="button" id="dlCountBar" class="ghost">Download this bar chart</button>
       </div>
       <div id="countTable"></div>
+      <details class="tableWrap" open>
+        <summary>Individual samples (% by number of positive markers)</summary>
+        <div id="countSamples"></div>
+        <div class="btns"><button type="button" id="dlCountSamples" class="ghost">Download this table (CSV)</button></div>
+      </details>
     </section>
     <details class="tableWrap" id="rawWrap" hidden>
       <summary>Averaged raw values (input units, before normalization)</summary>
@@ -286,6 +291,6 @@
   </main>
 </div>
 
-<script src="app.js?v=22"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>

@@ -468,11 +468,12 @@
       const groups = new Map();
       ds.samples.forEach((s) => {
         const g = s.meta[st.groupCol] || '(blank)';
-        if (!groups.has(g)) groups.set(g, []);
-        groups.get(g).push(agg(s.values));
+        if (!groups.has(g)) groups.set(g, { arr: [], names: [] });
+        groups.get(g).arr.push(agg(s.values));
+        groups.get(g).names.push(s.name);
       });
-      pies = [...groups].map(([g, arr]) => ({
-        name: g, n: arr.length, repValues: arr,
+      pies = [...groups].map(([g, { arr, names }]) => ({
+        name: g, n: arr.length, repValues: arr, repNames: names,
         values: arr[0].map((_, j) => arr.reduce((a, v) => a + v[j], 0) / arr.length),
       }));
     } else {
@@ -519,7 +520,7 @@
       p.inputN = input.length;
       p.dropped = input.length - reps.length;
       p.n = reps.length;
-      if (p.repValues) p.reps = reps;
+      if (p.repValues) { p.reps = reps; p.repUsable = totals.map((t) => t > 0); }
     });
 
     const markers = inc.map((i) => st.markers[i]);
@@ -1172,6 +1173,50 @@
     st.lastCountStats = resCount; st.lastCountBar = figCount;
     $('countPlot').innerHTML = figCount ? figCount.svg : '';
     $('countTable').innerHTML = buildCountTable(d, resCount, cv);
+    $('countSamples').innerHTML = buildCountSampleTable(d, resCount, cv);
+  }
+
+  // Every replicate's value behind the by-count bars, for the groups the chart shows.
+  // A replicate with no usable composition stays listed, marked, so the n adds up.
+  function countSampleRows(d, res, cv) {
+    const names = res && opts.barGroups === 'pair' ? [res.a, res.b] : d.pies.map((p) => p.name);
+    const rows = [];
+    names.forEach((n) => {
+      const p = d.pies.find((x) => x.name === n);
+      if (!p || !p.repNames) return;
+      const reps = cv.reps(p);
+      let k = 0;
+      p.repNames.forEach((s, i) => {
+        rows.push({ group: p.name, sample: s, vals: p.repUsable[i] ? reps[k++].map((x) => x * 100) : null });
+      });
+    });
+    return rows;
+  }
+
+  function buildCountSampleTable(d, res, cv) {
+    const rows = countSampleRows(d, res, cv);
+    if (!rows.length) return '';
+    let h = '<table class="data"><thead><tr><th>Group</th><th>Sample</th>';
+    cv.cols.forEach((col) => { h += `<th>${esc(col.label)} %</th>`; });
+    h += '</tr></thead><tbody>';
+    rows.forEach((r) => {
+      h += `<tr><td>${esc(r.group)}</td><td>${esc(r.sample)}</td>`;
+      h += r.vals ? r.vals.map((v) => `<td>${numberText(v)}</td>`).join('')
+        : `<td colspan="${cv.cols.length}">no usable composition (left out)</td>`;
+      h += '</tr>';
+    });
+    return h + '</tbody></table>';
+  }
+
+  function downloadCountSamplesCsv() {
+    const d = st.lastData;
+    if (!d) return;
+    const cv = countView(d), q = (x) => `"${String(x).replace(/"/g, '""')}"`;
+    const lines = [['Group', 'Sample', ...cv.cols.map((c) => `${c.label} %`)].map(q).join(',')];
+    countSampleRows(d, st.lastCountStats, cv).forEach((r) => {
+      lines.push([q(r.group), q(r.sample), ...(r.vals ? r.vals.map((v) => numberText(v, 4)) : cv.cols.map(() => ''))].join(','));
+    });
+    saveBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' }), `${baseName()}_by_count_samples.csv`);
   }
 
   // one row per number of positive markers, all combinations with that count summed
@@ -1671,6 +1716,7 @@
     const fmt = $('fmt').value;
     saveBlob(await figToBlob(st.lastBar, fmt), `${baseName()}_bars${EXT[fmt]}`);
   }));
+  $('dlCountSamples').addEventListener('click', downloadCountSamplesCsv);
   $('dlCountBar').addEventListener('click', () => withBusy(async () => {
     if (!st.lastCountBar) return;
     const fmt = $('fmt').value;
